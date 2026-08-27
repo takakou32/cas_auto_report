@@ -33,6 +33,10 @@
     <label><input type="checkbox" id="chk-mynumber"> 個人番号</label>
   </div>
   <p><button id="btn-issue">発行</button></p>
+  <div id="confirm-dialog" style="display:none">
+    <p>この内容で帳票を発行します。よろしいですか？</p>
+    <p><button id="btn-confirm-yes">はい</button> <button id="btn-confirm-no">いいえ</button></p>
+  </div>
 </div>
 
 <h2>発行済みリスト</h2>
@@ -83,8 +87,18 @@ function selectTarget(atena) {
   showScreen("screen-print");
 }
 
-// 発行（帳票出力の代用）。発行済みリストに宛名番号とチェック状態を積む
+// 発行ボタンは確認ダイアログを出すだけ（実際の出力は「はい」）
 document.getElementById("btn-issue").addEventListener("click", function () {
+  if (!selected) { return; }
+  document.getElementById("confirm-dialog").style.display = "";
+});
+
+document.getElementById("btn-confirm-no").addEventListener("click", function () {
+  document.getElementById("confirm-dialog").style.display = "none";
+});
+
+// 「はい」で発行（帳票出力の代用）。発行済みリストに宛名番号とチェック状態を積む
+document.getElementById("btn-confirm-yes").addEventListener("click", function () {
   if (!selected) { return; }
   var items = {};
   for (var i = 0; i < MOCK_ITEMS.length; i++) {
@@ -95,6 +109,7 @@ document.getElementById("btn-issue").addEventListener("click", function () {
   mockSaveIssued(list);
   mockRenderIssued(document.getElementById("issued-box"));
   selected = null;
+  document.getElementById("confirm-dialog").style.display = "none";
   document.getElementById("input-atena").value = "";
   showScreen("screen-search");
 });

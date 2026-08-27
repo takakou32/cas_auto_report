@@ -32,7 +32,7 @@
     記録時に使う宛名番号。記録した手順の中のこの番号を {{atena}} に置き換える
 
 .PARAMETER DryRun
-    出力実行ボタン（final）を押さずに、その手前まで再生する
+    出力実行ボタン（final）とそれ以降の手順を行わず、手前まで再生する。台帳には dry と記録する
 
 .PARAMETER Limit
     処理する件数の上限（全帳票の合計）。0なら制限なし
@@ -439,6 +439,33 @@ new Promise((resolve, reject) => {
                 Wait-PageReady -Ws $Ws -SettleMs $SettleMs
             }
         }
+        "expect_url" {
+            # 直前のクリックで狙った画面へ移ったかを確認する（移動はしない）。
+            # 記録時と同じURLになるまで待ち、ならなければその件を失敗にする。
+            # クエリ文字列は実行のたびに変わりやすいので、オリジン＋パス＋ハッシュで比べる。
+            $u  = ConvertTo-JsLiteral $Action.url
+            $to = if ($script:LoadTimeoutMs) { [int]$script:LoadTimeoutMs } else { 30000 }
+            $expr = @"
+new Promise((resolve) => {
+  const want = $u, deadline = Date.now() + $to;
+  function norm(u){
+    try { var t = new URL(u, location.href); return t.origin + t.pathname + t.hash; }
+    catch (e) { return u; }
+  }
+  const target = norm(want);
+  (function check(){
+    if (norm(location.href) === target) return resolve('ok');
+    if (Date.now() > deadline) return resolve('mismatch:' + location.href);
+    setTimeout(check, 100);
+  })();
+})
+"@
+            $st = "" + (Invoke-PageScriptSafe -Ws $Ws -Expression $expr -AwaitPromise $true)
+            if ($st -like "mismatch:*") {
+                throw "画面遷移が記録と違います: 期待 $($Action.url) / 実際 $($st.Substring(9))"
+            }
+            Wait-PageReady -Ws $Ws -SettleMs $SettleMs
+        }
         "select" {
             $sel = ConvertTo-JsLiteral $Action.selector
             $val = ConvertTo-JsLiteral $Action.value
@@ -618,6 +645,10 @@ function Expand-JobAction {
         $t = [string]$new["text"]
         if ($t.Contains("{{atena}}")) { $new["text"] = $AtenaNo }
     }
+    # goto / expect_url のURL（検索がGETで宛名番号がURLに乗る作りへの備え）
+    if ($new.ContainsKey("url") -and $new["url"]) {
+        $new["url"] = ([string]$new["url"]).Replace("{{atena}}", $AtenaNo)
+    }
     return [PSCustomObject]$new
 }
 
@@ -626,6 +657,7 @@ function Invoke-JobForAtena {
     param($Ws, $JobDef, [string]$AtenaNo, [string]$JobName, [int]$SettleMs,
           [bool]$DryRunMode, [string]$Evidence)
 
+    $stopped = $false
     foreach ($a in @($JobDef.actions)) {
         $act = Expand-JobAction -Action $a -AtenaNo $AtenaNo
         $isFinal = [bool]$act.final
@@ -634,17 +666,19 @@ function Invoke-JobForAtena {
             Save-Screenshot -Ws $Ws -Path (Join-Path (Join-Path "output" $JobName) "${AtenaNo}_before.png")
         }
         if ($isFinal -and $DryRunMode) {
-            # DryRun: 出力実行ボタンは押さない（手前までは全部流している）
-            Write-Host "  (DryRun: 出力実行ボタンは押しません: $($act.text))"
-            continue
+            # DryRun: 出力実行ボタンは押さず、それ以降の手順（確認ダイアログのはい等）も行わない
+            Write-Host "  (DryRun: 出力実行ボタン以降は行いません: $($act.text))"
+            $stopped = $true
+            break
         }
 
         Invoke-CapAction -Ws $Ws -Action $act -SettleMs $SettleMs
+    }
 
-        if ($isFinal -and ($Evidence -eq "after" -or $Evidence -eq "both")) {
-            Wait-PageReady -Ws $Ws -SettleMs $SettleMs
-            Save-Screenshot -Ws $Ws -Path (Join-Path (Join-Path "output" $JobName) "${AtenaNo}_after.png")
-        }
+    # 証跡(after)は手順を最後まで流し終えてから撮る
+    if (-not $stopped -and ($Evidence -eq "after" -or $Evidence -eq "both")) {
+        Wait-PageReady -Ws $Ws -SettleMs $SettleMs
+        Save-Screenshot -Ws $Ws -Path (Join-Path (Join-Path "output" $JobName) "${AtenaNo}_after.png")
     }
 }
 
@@ -740,7 +774,8 @@ function Invoke-PrintRun {
                 }
 
                 Write-Host "[$name] $atenaNo : 処理中..."
-                $status = "ok"
+                # DryRunは「試しに流しただけ」なので ok とは区別する（本番のスキップ判定はokのみ）
+                $status = if ($DryRunMode) { "dry" } else { "ok" }
                 $errText = ""
                 try {
                     Invoke-JobForAtena -Ws $ws -JobDef $jobDef -AtenaNo $atenaNo -JobName $name `
@@ -754,8 +789,8 @@ function Invoke-PrintRun {
                 $ledger["$name`t$atenaNo"] = $status
                 $processed++
 
-                if ($status -eq "ok") {
-                    Write-Host "  完了"
+                if ($status -ne "fail") {
+                    if ($status -eq "dry") { Write-Host "  完了（DryRun）" } else { Write-Host "  完了" }
                     $consecutiveFail = 0
                 } else {
                     Write-Warning "  失敗: $errText"
@@ -961,11 +996,12 @@ function Add-RecAction {
     }
     if ($Verbose) {
         $desc = switch ($Action.type) {
-            "click"    { "click $($Action.selector) ($($Action.text))" }
-            "goto"     { "goto $($Action.url)" }
-            "setcheck" { "setcheck $($Action.label) = $($Action.checked)" }
-            "fill"     { "fill $($Action.selector) = $($Action.value)" }
-            default    { "$($Action.type) $($Action.selector)" }
+            "click"      { "click $($Action.selector) ($($Action.text))" }
+            "goto"       { "goto $($Action.url)" }
+            "expect_url" { "expect_url $($Action.url)" }
+            "setcheck"   { "setcheck $($Action.label) = $($Action.checked)" }
+            "fill"       { "fill $($Action.selector) = $($Action.value)" }
+            default      { "$($Action.type) $($Action.selector)" }
         }
         Write-Host "  手順 $($script:RecActions.Count): $desc"
     }
@@ -1025,11 +1061,15 @@ function Add-RecordSample {
             try { $sameOrigin = (([Uri]$url).GetLeftPart([System.UriPartial]::Authority) -eq ([Uri]$script:RecLastUrl).GetLeftPart([System.UriPartial]::Authority)) } catch {}
             if ($sameOrigin -and [int]$obj.load -le $script:RecLastLoad) { $script:RecSawSpa = $true }
         }
-        # 遷移が起きた → 宛先URLへの goto を手順に。
-        # （保留クリックがあればそれが起こした遷移なので、click は破棄し goto で確実に再現する）
-        $script:RecPendingClick = $null
-        $script:RecClickArmed = 0
-        Add-RecAction -Action ([ordered]@{ type = "goto"; url = $url }) -Verbose $Verbose
+        if ($script:RecPendingClick) {
+            # 保留クリックが起こした遷移 → クリックはそのまま残し、
+            # その直後に「このURLになったことの確認」を入れる（押すこと自体に意味があるため）
+            Complete-PendingClick -Verbose $Verbose
+            Add-RecAction -Action ([ordered]@{ type = "expect_url"; url = $url }) -Verbose $Verbose
+        } else {
+            # 直前にクリックが無いURL変化（記録開始時の画面・アドレスバー直打ち等）だけ goto にする
+            Add-RecAction -Action ([ordered]@{ type = "goto"; url = $url }) -Verbose $Verbose
+        }
         $script:RecLastUrl = $url
     }
     if ($null -ne $obj.load) { $script:RecLastLoad = [int]$obj.load }
@@ -1064,6 +1104,11 @@ function Convert-AtenaPlaceholder {
                 $a["selector"] = ([string]$a["selector"]).Replace($AtenaNo, "{{atena}}")
                 $count++
             }
+        }
+        # 検索がGETで宛名番号がURLに乗る作りへの備え（goto / expect_url の両方）
+        if ($a.Contains("url") -and [string]$a["url"] -like "*$AtenaNo*") {
+            $a["url"] = ([string]$a["url"]).Replace($AtenaNo, "{{atena}}")
+            $count++
         }
     }
     return $count
@@ -1167,6 +1212,18 @@ function Start-JobRecording {
         return
     }
 
+    # クリックが1つも無い手順は「押す操作」が抜けている＝帳票が出ない。保存せずに中止する。
+    $clickIdx = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt $acts.Count; $i++) {
+        if ($acts[$i].type -eq "click") { [void]$clickIdx.Add($i) }
+    }
+    if ($clickIdx.Count -eq 0) {
+        Write-Host ""
+        Write-Warning "クリックが1つも記録されませんでした。手順として成立しないため保存を中止します。"
+        Write-Warning "  メニューの基準画面から、出力完了まで通しで操作してから Enter を押してください。"
+        return
+    }
+
     # 宛名番号を差し替え可能にする
     $replaced = Convert-AtenaPlaceholder -Actions $acts -AtenaNo $AtenaNo
     if ($replaced -eq 0) {
@@ -1176,27 +1233,29 @@ function Start-JobRecording {
         Write-Host "宛名番号を {{atena}} に置換: $replaced 箇所"
     }
 
-    # 最後のクリックを「出力実行」ボタンとみなす（-DryRun で押さないようにするため）
-    $lastIdx = -1
-    for ($i = $acts.Count - 1; $i -ge 0; $i--) {
-        if ($acts[$i].type -eq "click") { $lastIdx = $i; break }
+    # 「出力実行」ボタンがどれかを選んでもらう。
+    # 出力ボタンの後に確認ダイアログの「はい」がある画面だと、最後のクリック＝出力ボタンとは限らない。
+    $cands = @($clickIdx | Select-Object -Last 5)
+    $defNo = $cands.Count
+    Write-Host ""
+    Write-Host "どれが「出力実行」ボタンですか？（記録した最後の $($cands.Count) クリック）"
+    for ($n = 0; $n -lt $cands.Count; $n++) {
+        $ca = $acts[$cands[$n]]
+        Write-Host ("  {0}: {1}  [{2}]" -f ($n + 1), $ca["text"], $ca["selector"])
     }
-    if ($lastIdx -lt 0) {
-        Write-Warning "クリックが記録されていないため、出力実行ボタン(final)を設定できません。"
-    } else {
-        $la = $acts[$lastIdx]
-        Write-Host ""
-        Write-Host "最後のクリックを『出力実行』ボタンとして扱います:"
-        Write-Host "  ボタン名: $($la["text"])"
-        Write-Host "  セレクタ: $($la["selector"])"
-        $ans = Read-Host "よろしいですか？ (Y/n)"
-        if (-not $ans -or $ans -match "^[Yy]") {
-            $la["final"] = $true
-            Write-Host "  final を設定しました（-DryRun ではこのクリックを行いません）"
+    Write-Host "選んだクリック以降の手順は、-DryRun のとき実行しません。"
+    $ans = Read-Host "番号を入力してください（Enterのみなら $defNo = 最後のクリック）"
+    $sel = $defNo
+    if ($ans) {
+        if ($ans -match '^\d+$' -and [int]$ans -ge 1 -and [int]$ans -le $cands.Count) {
+            $sel = [int]$ans
         } else {
-            Write-Warning "  final を設定しませんでした（-DryRun でも出力ボタンを押してしまいます）"
+            Write-Warning "番号が正しくありません。最後のクリック($defNo)を出力実行ボタンとして扱います。"
         }
     }
+    $fa = $acts[$cands[$sel - 1]]
+    $fa["final"] = $true
+    Write-Host "  出力実行ボタン: $($fa["text"]) [$($fa["selector"])] （final=true）"
 
     Save-JobFile -BaseCfg $Cfg -JobName $JobName -Actions $acts -OutPath $OutPath -SpaMode $script:RecSawSpa
     Write-Host ""

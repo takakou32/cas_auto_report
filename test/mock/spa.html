@@ -41,6 +41,10 @@
     <label><input type="checkbox" id="chk-mynumber"> 個人番号</label>
   </div>
   <p><button id="btn-issue">発行</button></p>
+  <div id="confirm-dialog" style="display:none">
+    <p>この内容で帳票を発行します。よろしいですか？</p>
+    <p><button id="btn-confirm-yes">はい</button> <button id="btn-confirm-no">いいえ</button></p>
+  </div>
 </div>
 
 <h2>発行済みリスト</h2>
@@ -66,6 +70,7 @@ function render() {
   for (var i = 0; i < ids.length; i++) {
     document.getElementById(ids[i]).style.display = (ids[i] === show) ? "" : "none";
   }
+  document.getElementById("confirm-dialog").style.display = "none";
   if (show === "screen-result") { renderResult(); }
   if (show === "screen-print")  { renderPrint(); }
 }
@@ -108,8 +113,19 @@ document.getElementById("btn-search").addEventListener("click", function () {
   go("#/result");
 });
 
-// 発行はURLを変えない（帳票出力の代用）
+// 発行ボタンは確認ダイアログを出すだけ（実際の出力は「はい」）
 document.getElementById("btn-issue").addEventListener("click", function () {
+  var a = stateGet("spa_atena");
+  if (!a || !MOCK_DB[a]) { return; }
+  document.getElementById("confirm-dialog").style.display = "";
+});
+
+document.getElementById("btn-confirm-no").addEventListener("click", function () {
+  document.getElementById("confirm-dialog").style.display = "none";
+});
+
+// 「はい」で発行（帳票出力の代用）
+document.getElementById("btn-confirm-yes").addEventListener("click", function () {
   var a = stateGet("spa_atena");
   if (!a || !MOCK_DB[a]) { return; }
   var items = {};
@@ -120,6 +136,7 @@ document.getElementById("btn-issue").addEventListener("click", function () {
   list.push({ atena: a, name: MOCK_DB[a], items: items, ts: new Date().toISOString() });
   mockSaveIssued(list);
   mockRenderIssued(document.getElementById("issued-box"));
+  document.getElementById("confirm-dialog").style.display = "none";
   document.getElementById("input-atena").value = "";
   stateSet("spa_atena", "");
   stateSet("spa_query", "");
