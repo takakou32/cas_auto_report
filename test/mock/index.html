@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>練習システム - メニュー</title>
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<h1>練習システム（cas_auto_report 検証用）</h1>
+
+<div class="screen" id="screen-menu">
+  <h2>メニュー</h2>
+  <ul class="menu-list">
+    <li class="menu-item"><a href="app.html" id="link-shomei">証明書発行</a></li>
+    <li class="menu-item"><a href="spa.html#/menu" id="link-shomei-spa-entry">証明書発行（SPA版）</a></li>
+  </ul>
+</div>
+
+<div class="tool">
+  <label><input type="checkbox" id="chk-flip"> （検証用）印字項目の初期状態を反転する</label>
+</div>
+
+<h2>発行済みリスト</h2>
+<div id="issued-box"></div>
+<p><button id="btn-clear">発行済みリストを消去（検証用）</button></p>
+
+<script src="mock.js"></script>
+<script>
+mockRenderIssued(document.getElementById("issued-box"));
+mockInitFlip(document.getElementById("chk-flip"));
+document.getElementById("btn-clear").addEventListener("click", function () {
+  mockSaveIssued([]);
+  mockRenderIssued(document.getElementById("issued-box"));
+});
+</script>
+</body>
+</html>

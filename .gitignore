@@ -1,0 +1,19 @@
+# 記録した操作手順（客先の画面遷移が入るため公開しない）
+jobs/*.json
+
+# 対象者リスト（宛名番号が入るため公開しない）
+targets/*.csv
+
+# 実行結果の記録
+ledger*.csv
+
+# 証跡スクリーンショット
+output/*
+
+# 実環境の設定（URL等が入るため公開しない）
+config/config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp

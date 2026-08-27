@@ -1,0 +1,13 @@
+body { font-family: "Meiryo", "Yu Gothic", sans-serif; font-size: 14px; margin: 24px; color: #222; }
+h1 { font-size: 20px; border-bottom: 2px solid #356; padding-bottom: 4px; }
+h2 { font-size: 16px; margin-top: 24px; }
+.screen { border: 1px solid #bbb; padding: 16px; margin-top: 12px; background: #fafafa; }
+.menu-list, .result-list { list-style: none; padding-left: 0; }
+.menu-item { margin: 6px 0; }
+.result-row { border: 1px solid #ccc; padding: 8px; margin: 4px 0; background: #fff; cursor: pointer; }
+.result-row:hover { background: #eef; }
+.empty { color: #a00; }
+.items label { display: block; margin: 4px 0; }
+.issued-item { border-bottom: 1px dotted #ccc; padding: 4px 0; font-family: "Consolas", monospace; }
+.tool { margin-top: 16px; color: #555; }
+button { padding: 4px 16px; }

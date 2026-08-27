@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>練習システム - 証明書発行</title>
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<h1>証明書発行</h1>
+
+<div class="screen" id="screen-search">
+  <h2>対象者検索</h2>
+  <p>
+    <label for="input-atena">宛名番号</label>
+    <input type="text" id="input-atena" placeholder="宛名番号">
+    <button id="btn-search">検索</button>
+  </p>
+</div>
+
+<div class="screen" id="screen-result" style="display:none">
+  <h2>検索結果</h2>
+  <ul class="result-list" id="result-list"></ul>
+  <p class="empty" id="result-empty" style="display:none">該当する対象者はいません</p>
+</div>
+
+<div class="screen" id="screen-print" style="display:none">
+  <h2>印字項目の選択</h2>
+  <p>対象者: <span id="print-target"></span></p>
+  <div class="items">
+    <label><input type="checkbox" id="chk-setai"> 世帯主</label>
+    <label><input type="checkbox" id="chk-zokugara"> 続柄</label>
+    <label><input type="checkbox" id="chk-honseki"> 本籍</label>
+    <label><input type="checkbox" id="chk-mynumber"> 個人番号</label>
+  </div>
+  <p><button id="btn-issue">発行</button></p>
+</div>
+
+<h2>発行済みリスト</h2>
+<div id="issued-box"></div>
+
+<script src="mock.js"></script>
+<script>
+// 選択中の対象者（画面3で行をクリックすると確定する）
+var selected = null;
+
+function showScreen(id) {
+  var ids = ["screen-search", "screen-result", "screen-print"];
+  for (var i = 0; i < ids.length; i++) {
+    document.getElementById(ids[i]).style.display = (ids[i] === id) ? "" : "none";
+  }
+}
+
+// 画面2 → 画面3（検索）。URLは変えない＝業務システムのポストバックを模す
+document.getElementById("btn-search").addEventListener("click", function () {
+  var atena = document.getElementById("input-atena").value.trim();
+  var list = document.getElementById("result-list");
+  var empty = document.getElementById("result-empty");
+  list.innerHTML = "";
+  selected = null;
+  if (MOCK_DB[atena]) {
+    var li = document.createElement("li");
+    li.className = "result-row";
+    li.setAttribute("data-atena", atena);
+    li.textContent = atena + " " + MOCK_DB[atena];
+    li.addEventListener("click", function () { selectTarget(atena); });
+    list.appendChild(li);
+    empty.style.display = "none";
+  } else {
+    empty.style.display = "";
+  }
+  showScreen("screen-result");
+});
+
+// 画面3 → 画面4（対象者の確定）。印字項目の初期状態は対象者ごとに変わる
+function selectTarget(atena) {
+  selected = { atena: atena, name: MOCK_DB[atena] };
+  document.getElementById("print-target").textContent = atena + " " + MOCK_DB[atena];
+  var init = mockInitialChecks(atena);
+  for (var i = 0; i < MOCK_ITEMS.length; i++) {
+    var it = MOCK_ITEMS[i];
+    document.getElementById(it.id).checked = !!init[it.id];
+  }
+  showScreen("screen-print");
+}
+
+// 発行（帳票出力の代用）。発行済みリストに宛名番号とチェック状態を積む
+document.getElementById("btn-issue").addEventListener("click", function () {
+  if (!selected) { return; }
+  var items = {};
+  for (var i = 0; i < MOCK_ITEMS.length; i++) {
+    items[MOCK_ITEMS[i].id] = document.getElementById(MOCK_ITEMS[i].id).checked;
+  }
+  var list = mockLoadIssued();
+  list.push({ atena: selected.atena, name: selected.name, items: items, ts: new Date().toISOString() });
+  mockSaveIssued(list);
+  mockRenderIssued(document.getElementById("issued-box"));
+  selected = null;
+  document.getElementById("input-atena").value = "";
+  showScreen("screen-search");
+});
+
+mockRenderIssued(document.getElementById("issued-box"));
+</script>
+</body>
+</html>

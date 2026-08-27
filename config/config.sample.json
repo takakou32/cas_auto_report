@@ -1,0 +1,18 @@
+{
+  "cdp_url": "http://localhost:9222",
+  "target_url_keyword": "your-app-url",
+  "settle_ms": 800,
+  "stable_ms": 1000,
+  "load_timeout_ms": 30000,
+  "action_timeout_ms": 5000,
+  "ready_selector": "",
+  "spa_mode": false,
+  "interval_ms": 1000,
+  "max_consecutive_fail": 5,
+  "evidence": "none",
+  "viewport": {
+    "width": 1280,
+    "height": 800,
+    "device_scale_factor": 1
+  }
+}
