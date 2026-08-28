@@ -686,7 +686,7 @@ function Expand-JobAction {
 # 1人分の手順を頭から再生する。途中で失敗したら例外を投げて、その件を打ち切る。
 function Invoke-JobForAtena {
     param($Ws, $JobDef, [string]$AtenaNo, [string]$JobName, [int]$SettleMs,
-          [bool]$DryRunMode, [string]$Evidence)
+          [bool]$DryRunMode, [string]$Evidence, [int]$WaitAfterMs)
 
     $stopped = $false
     foreach ($a in @($JobDef.actions)) {
@@ -704,6 +704,15 @@ function Invoke-JobForAtena {
         }
 
         Invoke-CapAction -Ws $Ws -Action $act -SettleMs $SettleMs
+
+        # 記録時に「この操作の後は待つ」と指名された手順。
+        # 画面が裏で印刷プレビューを作っている間はボタンを押しても効かないが、
+        # くるくるは絵が回っているだけでDOMが変わらないため、通常の待機ではすり抜ける。
+        # そこで画面の状態は見ずに、決めた時間だけ止まる（意図した割り切り）。
+        if ([bool]$act.wait_after -and $WaitAfterMs -gt 0) {
+            Write-Host "  (操作後の待ち: $WaitAfterMs ms)"
+            Start-Sleep -Milliseconds $WaitAfterMs
+        }
     }
 
     # 証跡(after)は手順を最後まで流し終えてから撮る
@@ -723,6 +732,8 @@ function Invoke-PrintRun {
     $settleMs = if ($null -ne $Cfg.settle_ms) { [int]$Cfg.settle_ms } else { 800 }
     $interval = if ($null -ne $Cfg.interval_ms) { [int]$Cfg.interval_ms } else { 1000 }
     $maxFail  = if ($null -ne $Cfg.max_consecutive_fail) { [int]$Cfg.max_consecutive_fail } else { 5 }
+    # wait_after が付いた手順の後に待つ時間。記録ファイルではなく設定側に置き、録り直さずに調整できるようにする
+    $waitAfterMs = if ($null -ne $Cfg.wait_after_ms) { [int]$Cfg.wait_after_ms } else { 5000 }
     $evidence = if ($EvidenceMode) { $EvidenceMode }
                 elseif ($Cfg.evidence) { [string]$Cfg.evidence } else { "none" }
 
@@ -810,7 +821,8 @@ function Invoke-PrintRun {
                 $errText = ""
                 try {
                     Invoke-JobForAtena -Ws $ws -JobDef $jobDef -AtenaNo $atenaNo -JobName $name `
-                        -SettleMs $settleMs -DryRunMode $DryRunMode -Evidence $evidence
+                        -SettleMs $settleMs -DryRunMode $DryRunMode -Evidence $evidence `
+                        -WaitAfterMs $waitAfterMs
                 } catch {
                     $status = "fail"
                     $errText = "$_"
@@ -1013,6 +1025,21 @@ $script:DrainJs = @'
 (function(){try{var k="__capRec";var arr=JSON.parse(localStorage.getItem(k)||"[]");localStorage.setItem(k,"[]");var ld=0;try{ld=parseInt(sessionStorage.getItem("__capLoad")||"0",10)}catch(e){}return JSON.stringify({url:location.href,load:ld,events:arr});}catch(e){return JSON.stringify({url:"",load:0,events:[]});}})()
 '@
 
+# 手順1件を人が読める1行にする。
+# 記録中に出す一覧と、記録終了時に「待たせる操作」を選んでもらう一覧で同じ書式を使うため、
+# ここに1本化してある（人が番号と中身を突き合わせられるように）。
+function Get-ActionDesc {
+    param($Action)
+    switch ($Action.type) {
+        "click"      { return "click $($Action.selector) ($($Action.text))" }
+        "goto"       { return "goto $($Action.url)" }
+        "expect_url" { return "expect_url $($Action.url)" }
+        "setcheck"   { return "setcheck $($Action.label) = $($Action.checked)" }
+        "fill"       { return "fill $($Action.selector) = $($Action.value)" }
+        default      { return "$($Action.type) $($Action.selector)" }
+    }
+}
+
 # 記録した手順を1本の actions 配列として確定する
 function Add-RecAction {
     param($Action, [bool]$Verbose)
@@ -1026,15 +1053,7 @@ function Add-RecAction {
         [void]$script:RecActions.Add($Action)
     }
     if ($Verbose) {
-        $desc = switch ($Action.type) {
-            "click"      { "click $($Action.selector) ($($Action.text))" }
-            "goto"       { "goto $($Action.url)" }
-            "expect_url" { "expect_url $($Action.url)" }
-            "setcheck"   { "setcheck $($Action.label) = $($Action.checked)" }
-            "fill"       { "fill $($Action.selector) = $($Action.value)" }
-            default      { "$($Action.type) $($Action.selector)" }
-        }
-        Write-Host "  手順 $($script:RecActions.Count): $desc"
+        Write-Host "  手順 $($script:RecActions.Count): $(Get-ActionDesc -Action $Action)"
     }
 }
 
@@ -1287,6 +1306,39 @@ function Start-JobRecording {
     $fa = $acts[$cands[$sel - 1]]
     $fa["final"] = $true
     Write-Host "  出力実行ボタン: $($fa["text"]) [$($fa["selector"])] （final=true）"
+
+    # 「押しても効かない時間」がある画面への対策。
+    # 画面が裏で印刷プレビューを作っている間はボタンが効かないが、くるくるは絵が回るだけで
+    # DOMが変わらないため機械には見分けられない。どこで待つかは人が指名する。
+    Write-Host ""
+    Write-Host "実行後に待たせる操作はどれですか？（全 $($acts.Count) 手順）"
+    for ($n = 0; $n -lt $acts.Count; $n++) {
+        Write-Host ("{0,3}: {1}" -f ($n + 1), (Get-ActionDesc -Action $acts[$n]))
+    }
+    $ansWait = Read-Host "番号をカンマ区切りで入力（Enterで設定しない）"
+    $waitIdx = New-Object System.Collections.ArrayList
+    if ($ansWait) {
+        foreach ($tok in ($ansWait -split ',')) {
+            $t = $tok.Trim()
+            if (-not $t) { continue }
+            if ($t -match '^\d+$' -and [int]$t -ge 1 -and [int]$t -le $acts.Count) {
+                $i2 = [int]$t - 1
+                if (-not $waitIdx.Contains($i2)) { [void]$waitIdx.Add($i2) }
+            } else {
+                # 不正な番号はそれだけ無視する（黙って採用しない）
+                Write-Warning "手順番号として正しくありません（この番号は無視します）: $t"
+            }
+        }
+    }
+    if ($waitIdx.Count -eq 0) {
+        Write-Host "  操作後に待つ手順: なし"
+    } else {
+        foreach ($i2 in ($waitIdx | Sort-Object)) {
+            $acts[$i2]["wait_after"] = $true
+            Write-Host "  操作後に待つ: 手順 $($i2 + 1) $(Get-ActionDesc -Action $acts[$i2]) （wait_after=true）"
+        }
+        Write-Host "  待つ時間は config の wait_after_ms（既定 5000ms）で決まります。"
+    }
 
     Save-JobFile -BaseCfg $Cfg -JobName $JobName -Actions $acts -OutPath $OutPath -SpaMode $script:RecSawSpa
     Write-Host ""

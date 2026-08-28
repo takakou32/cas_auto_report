@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>練習システム - 証明書発行（プレビュー作成あり）</title>
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<h1>証明書発行（プレビュー作成あり）</h1>
+<p class="tool">
+  対象者を選ぶと、画面が裏で印刷プレビューを作り始める版。
+  作成中は「くるくる」が出て、プレビューボタンを押しても効かない。
+</p>
+
+<!-- アイコンの元絵（本物の業務システムでよくある sprite + use の形） -->
+<svg class="sprite" aria-hidden="true" style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="spr-search" viewBox="0 0 24 24"><path d="M10 2a8 8 0 105.29 14.05l5.33 5.33 1.41-1.41-5.33-5.33A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></symbol>
+  <symbol id="spr-eye" viewBox="0 0 24 24"><path d="M12 5C7 5 3 9.5 3 12s4 7 9 7 9-4.5 9-7-4-7-9-7zm0 11a4 4 0 110-8 4 4 0 010 8zm0-6a2 2 0 100 4 2 2 0 000-4z"/></symbol>
+</svg>
+
+<div class="screen" id="screen-search">
+  <h2>対象者検索</h2>
+  <p>
+    <label for="input-atena">宛名番号</label>
+    <input type="text" id="input-atena" placeholder="宛名番号">
+    <button id="btn-search">検索</button>
+    <button id="btn-search-icon" class="icon-btn" title="検索"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#spr-search"></use></svg></button>
+  </p>
+</div>
+
+<div class="screen" id="screen-result" style="display:none">
+  <h2>検索結果</h2>
+  <ul class="result-list" id="result-list"></ul>
+  <p class="empty" id="result-empty" style="display:none">該当する対象者はいません</p>
+</div>
+
+<div class="screen" id="screen-print" style="display:none">
+  <h2>印字項目の選択</h2>
+  <p>対象者: <span id="print-target"></span></p>
+  <div class="items">
+    <label><input type="checkbox" id="chk-setai"> 世帯主</label>
+    <label><input type="checkbox" id="chk-zokugara"> 続柄</label>
+    <label><input type="checkbox" id="chk-honseki"> 本籍</label>
+    <label><input type="checkbox" id="chk-mynumber"> 個人番号</label>
+  </div>
+  <!-- くるくる。回っているのはCSSアニメーションだけで、DOMは一切変わらない -->
+  <p class="busy-row" id="busy-row" style="display:none">
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="busy-note">印刷プレビューを作成しています…</span>
+  </p>
+  <p class="icon-row">
+    <svg id="icon-preview" class="icon" role="button" tabindex="0" aria-label="プレビュー" viewBox="0 0 24 24"><use href="#spr-eye"></use></svg>
+    <span class="icon-note" id="preview-state">プレビュー: 未</span>
+  </p>
+  <div id="preview-box" style="display:none">プレビュー表示中（帳票の下書き）</div>
+  <p><button id="btn-issue">発行</button></p>
+  <p class="empty" id="issue-error" style="display:none">プレビューを作成してから発行してください</p>
+  <div id="confirm-dialog" style="display:none">
+    <p>この内容で帳票を発行します。よろしいですか？</p>
+    <p><button id="btn-confirm-yes">はい</button> <button id="btn-confirm-no">いいえ</button></p>
+  </div>
+</div>
+
+<h2>発行済みリスト</h2>
+<div id="issued-box"></div>
+
+<script src="mock.js"></script>
+<script>
+// プレビューの作成にかかる時間(ms)。この間はプレビューボタンを押しても効かない。
+var PREVIEW_BUSY_MS = 3000;
+
+// 選択中の対象者（画面3で行をクリックすると確定する）
+var selected = null;
+// プレビューアイコン（svg自身がボタン）を押したか
+var previewed = false;
+// 印刷プレビューの作成中か（この間は押下を無効にする）
+var busy = false;
+var busyTimer = null;
+
+// 検証用の記録。何がいつ起きたかを後から測れるようにする（画面には出さない）
+window.__slowLog = [];
+function slowLog(ev) { window.__slowLog.push({ ev: ev, t: Date.now(), busy: busy }); }
+
+function showScreen(id) {
+  var ids = ["screen-search", "screen-result", "screen-print"];
+  for (var i = 0; i < ids.length; i++) {
+    document.getElementById(ids[i]).style.display = (ids[i] === id) ? "" : "none";
+  }
+}
+
+// 画面2 → 画面3（検索）。URLは変えない＝業務システムのポストバックを模す
+function doSearch() {
+  var atena = document.getElementById("input-atena").value.trim();
+  var list = document.getElementById("result-list");
+  var empty = document.getElementById("result-empty");
+  list.innerHTML = "";
+  selected = null;
+  if (MOCK_DB[atena]) {
+    var li = document.createElement("li");
+    li.className = "result-row";
+    li.setAttribute("data-atena", atena);
+    li.textContent = atena + " " + MOCK_DB[atena];
+    li.addEventListener("click", function () { selectTarget(atena); });
+    list.appendChild(li);
+    empty.style.display = "none";
+  } else {
+    empty.style.display = "";
+  }
+  showScreen("screen-result");
+}
+
+document.getElementById("btn-search").addEventListener("click", doSearch);
+document.getElementById("btn-search-icon").addEventListener("click", doSearch);
+
+// 印字画面に着いたら、裏で印刷プレビューの作成を始める（本物の業務システムと同じ）。
+// 表示するのは回るだけのくるくる。作成が終わるまでプレビューボタンは効かない。
+function startPreviewBuild() {
+  busy = true;
+  slowLog("busy-start");
+  document.getElementById("busy-row").style.display = "";
+  if (busyTimer) { clearTimeout(busyTimer); }
+  busyTimer = setTimeout(function () {
+    busy = false;
+    slowLog("busy-end");
+    document.getElementById("busy-row").style.display = "none";
+  }, PREVIEW_BUSY_MS);
+}
+
+// プレビューアイコン。svg要素そのものに click ハンドラを付けている（本物のアイコンUIと同じ）
+document.getElementById("icon-preview").addEventListener("click", function () {
+  slowLog("preview-click");
+  // 作成中は押しても何も起きない（エラーも出ない）。これがすり抜けの原因
+  if (busy) { return; }
+  previewed = true;
+  document.getElementById("preview-state").textContent = "プレビュー: 済";
+  document.getElementById("preview-box").style.display = "";
+});
+
+// 画面3 → 画面4（対象者の確定）。印字項目の初期状態は対象者ごとに変わる
+function selectTarget(atena) {
+  selected = { atena: atena, name: MOCK_DB[atena] };
+  document.getElementById("print-target").textContent = atena + " " + MOCK_DB[atena];
+  previewed = false;
+  document.getElementById("preview-state").textContent = "プレビュー: 未";
+  document.getElementById("preview-box").style.display = "none";
+  document.getElementById("issue-error").style.display = "none";
+  var init = mockInitialChecks(atena);
+  for (var i = 0; i < MOCK_ITEMS.length; i++) {
+    var it = MOCK_ITEMS[i];
+    document.getElementById(it.id).checked = !!init[it.id];
+  }
+  showScreen("screen-print");
+  startPreviewBuild();
+}
+
+// 発行ボタン。プレビューができていないと発行できない（帳票が出ない）
+document.getElementById("btn-issue").addEventListener("click", function () {
+  if (!selected) { return; }
+  slowLog("issue-click");
+  if (!previewed) {
+    document.getElementById("issue-error").style.display = "";
+    return;
+  }
+  document.getElementById("issue-error").style.display = "none";
+  document.getElementById("confirm-dialog").style.display = "";
+});
+
+document.getElementById("btn-confirm-no").addEventListener("click", function () {
+  document.getElementById("confirm-dialog").style.display = "none";
+});
+
+// 「はい」で発行（帳票出力の代用）。発行済みリストに宛名番号とチェック状態を積む
+document.getElementById("btn-confirm-yes").addEventListener("click", function () {
+  if (!selected) { return; }
+  var items = {};
+  for (var i = 0; i < MOCK_ITEMS.length; i++) {
+    items[MOCK_ITEMS[i].id] = document.getElementById(MOCK_ITEMS[i].id).checked;
+  }
+  var list = mockLoadIssued();
+  list.push({ atena: selected.atena, name: selected.name, items: items, preview: previewed, ts: new Date().toISOString() });
+  mockSaveIssued(list);
+  mockRenderIssued(document.getElementById("issued-box"));
+  slowLog("issued");
+  selected = null;
+  previewed = false;
+  document.getElementById("preview-state").textContent = "プレビュー: 未";
+  document.getElementById("preview-box").style.display = "none";
+  document.getElementById("confirm-dialog").style.display = "none";
+  document.getElementById("input-atena").value = "";
+  showScreen("screen-search");
+});
+
+mockRenderIssued(document.getElementById("issued-box"));
+</script>
+</body>
+</html>
