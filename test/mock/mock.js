@@ -18,6 +18,7 @@ var MOCK_ITEMS = [
 
 var ISSUED_KEY = "mock_issued";
 var FLIP_KEY   = "mock_flip";
+var MULTI_KEY  = "mock_multi";
 
 // 検証用スイッチ。ONにすると印字項目の初期状態を反転する（setcheckの実証用）
 function mockFlipped() {
@@ -35,6 +36,12 @@ function mockInitialChecks(atena) {
     res[MOCK_ITEMS[j].id] = flip ? !on : on;
   }
   return res;
+}
+
+// 検証用スイッチ。ONにすると氏名だけの一覧（roster.html）の検索結果を複数件にする
+// （位置で押すとき「2件以上なら押さない」を確かめるため）
+function mockMulti() {
+  try { return localStorage.getItem(MULTI_KEY) === "1"; } catch (e) { return false; }
 }
 
 function mockLoadIssued() {
@@ -71,5 +78,14 @@ function mockInitFlip(el) {
   el.checked = mockFlipped();
   el.addEventListener("change", function () {
     try { localStorage.setItem(FLIP_KEY, el.checked ? "1" : "0"); } catch (e) {}
+  });
+}
+
+// 検索結果を複数件にするスイッチも同じように同期させる
+function mockInitMulti(el) {
+  if (!el) { return; }
+  el.checked = mockMulti();
+  el.addEventListener("change", function () {
+    try { localStorage.setItem(MULTI_KEY, el.checked ? "1" : "0"); } catch (e) {}
   });
 }

@@ -31,3 +31,10 @@ button { padding: 4px 16px; }
 }
 @keyframes mock-spin { to { transform: rotate(360deg); } }
 .busy-note { color: #555; margin-left: 6px; }
+
+/* 氏名だけの一覧（roster.html）。実環境（PrimeVue系）の行に合わせた見た目 */
+.p-datatable { border-collapse: collapse; background: #fff; }
+.p-datatable th, .p-datatable td { border: 1px solid #ccc; padding: 6px 24px 6px 8px; text-align: left; }
+.p-datatable th { background: #eef; }
+tr.p-selectable-row { cursor: pointer; }
+tr.p-selectable-row:hover { background: #eef; }

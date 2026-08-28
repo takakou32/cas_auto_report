@@ -261,40 +261,12 @@ new Promise((resolve) => {
 }
 
 # ---------------------------------------------------------------------------
-# アクション実行
-#   cas_cap と違い、対象が見つからない・待機タイムアウトは「スキップ」ではなく例外にする。
-#   ズレた画面のまま進んで、誤った対象で出力ボタンを押す事故を防ぐため。
+# クリックの共通部品（JS）
+#   通常のクリックと「位置で押す(by_index)」で押し方を同じにするため、ここに1本化してある。
+#   resolve は埋め込み先の Promise のものを使う。
 # ---------------------------------------------------------------------------
-function Invoke-CapAction {
-    param($Ws, $Action, [int]$SettleMs)
-
-    switch ($Action.type) {
-        "click" {
-            # ハイブリッド特定：セレクタで当てた要素を「記録時のボタン名(text/aria-label)」で検証する。
-            # 権限差などでDOMの順番が変わり、位置セレクタが“別要素”に当たった場合はラベルで探し直す。
-            $sel = ConvertTo-JsLiteral $Action.selector
-            $txt = ConvertTo-JsLiteral ([string]$Action.text)
-            $to  = $script:ActionTimeoutMs
-            $expr = @"
-new Promise((resolve) => {
-  const sel = $sel, text = $txt, deadline = Date.now() + $to;
+$script:ClickHelpersJs = @'
   function visible(e){ return e && (e.offsetParent !== null || (e.getClientRects && e.getClientRects().length > 0)); }
-  function txtOf(e){
-    var s=(e.innerText||e.textContent||'').trim();
-    if(!s){ try { s=((e.getAttribute('aria-label')||e.getAttribute('title'))||'').trim(); } catch(_){} }
-    return s;
-  }
-  function matches(a,b){
-    if(!a||!b) return false;
-    if(a===b) return true;
-    return (b.length>=2 && a.indexOf(b)>=0) || (a.length>=2 && b.indexOf(a)>=0);
-  }
-  function byText(){
-    if (!text) return null;
-    var list = Array.prototype.slice.call(document.querySelectorAll('a,button,[role=button],[role=tab],[role=menuitem],[role=link],[role=option],li,[tabindex],[onclick]')).filter(visible);
-    return list.find(function(e){ return txtOf(e) === text; })
-        || list.find(function(e){ return matches(txtOf(e), text); });
-  }
   // click() は HTML の要素にしかない。SVG(アイコン等)には無いので、そのまま呼ぶと
   // 「e.click is not a function」で落ちる。その場合はマウス操作を作って投げる。
   // 投げ先は要素そのもの。イベントは祖先へ伝わるので、ボタン側の処理も動く。
@@ -326,6 +298,88 @@ new Promise((resolve) => {
     // 押された場所を見て動きを変えるページで結果が変わるため。
     if(typeof e.click==='function'){ e.click(); } else { rawClick(e); }
     return resolve(how);
+  }
+'@
+
+# ---------------------------------------------------------------------------
+# 位置で押す（by_index）
+#   対象者ごとに表示が変わる行（氏名だけの一覧など）は、記録した「ボタン名」で照合すると
+#   2人目以降で外れる。そこでボタン名を一切見ずに、セレクタで取れる要素を押す。
+#   ただし押すのは「画面に見えているものがちょうど1件」のときだけ。2件以上なら押さずに失敗する。
+#   選択後の画面に宛名番号が出ないため、誤った対象を押しても気づく手段が無い。迷ったら止まる。
+# ---------------------------------------------------------------------------
+function Invoke-ClickByIndex {
+    param($Ws, $Action)
+
+    $sel = ConvertTo-JsLiteral $Action.selector
+    $to  = $script:ActionTimeoutMs
+    $expr = @"
+new Promise((resolve) => {
+  const sel = $sel, deadline = Date.now() + $to;
+$($script:ClickHelpersJs)
+  (function check(){
+    var list = [];
+    try { list = Array.prototype.slice.call(document.querySelectorAll(sel)).filter(visible); } catch(e){}
+    // ちょうど1件のときだけ押す
+    if (list.length === 1) return go(list[0], 'clicked');
+    // 2件以上は押さない。待っても減らないので、その場で失敗にする
+    if (list.length > 1) return resolve('multi:' + list.length);
+    // 0件はまだ描画中かもしれないので待つ
+    if (Date.now() > deadline) return resolve('notfound');
+    setTimeout(check, 150);
+  })();
+})
+"@
+    $st = "" + (Invoke-PageScriptSafe -Ws $Ws -Expression $expr -AwaitPromise $true)
+    if ($st -like "multi:*") {
+        throw "位置で押す対象が$($st.Substring(6))件見つかりました(1件のはず): $($Action.selector)"
+    }
+    if ($st -eq "notfound") {
+        throw "位置で押す対象が見つかりません: $($Action.selector)"
+    }
+    Write-Host "  (位置で押す: $($Action.selector))"
+}
+
+# ---------------------------------------------------------------------------
+# アクション実行
+#   cas_cap と違い、対象が見つからない・待機タイムアウトは「スキップ」ではなく例外にする。
+#   ズレた画面のまま進んで、誤った対象で出力ボタンを押す事故を防ぐため。
+# ---------------------------------------------------------------------------
+function Invoke-CapAction {
+    param($Ws, $Action, [int]$SettleMs)
+
+    # 位置で押すクリックは照合のしかたが違うので先に分ける
+    if ($Action.type -eq "click" -and [bool]$Action.by_index) {
+        Invoke-ClickByIndex -Ws $Ws -Action $Action
+        return
+    }
+
+    switch ($Action.type) {
+        "click" {
+            # ハイブリッド特定：セレクタで当てた要素を「記録時のボタン名(text/aria-label)」で検証する。
+            # 権限差などでDOMの順番が変わり、位置セレクタが“別要素”に当たった場合はラベルで探し直す。
+            $sel = ConvertTo-JsLiteral $Action.selector
+            $txt = ConvertTo-JsLiteral ([string]$Action.text)
+            $to  = $script:ActionTimeoutMs
+            $expr = @"
+new Promise((resolve) => {
+  const sel = $sel, text = $txt, deadline = Date.now() + $to;
+$($script:ClickHelpersJs)
+  function txtOf(e){
+    var s=(e.innerText||e.textContent||'').trim();
+    if(!s){ try { s=((e.getAttribute('aria-label')||e.getAttribute('title'))||'').trim(); } catch(_){} }
+    return s;
+  }
+  function matches(a,b){
+    if(!a||!b) return false;
+    if(a===b) return true;
+    return (b.length>=2 && a.indexOf(b)>=0) || (a.length>=2 && b.indexOf(a)>=0);
+  }
+  function byText(){
+    if (!text) return null;
+    var list = Array.prototype.slice.call(document.querySelectorAll('a,button,[role=button],[role=tab],[role=menuitem],[role=link],[role=option],li,[tabindex],[onclick]')).filter(visible);
+    return list.find(function(e){ return txtOf(e) === text; })
+        || list.find(function(e){ return matches(txtOf(e), text); });
   }
   (function check(){
     var el = null; try { el = document.querySelector(sel); } catch(e){}
@@ -972,6 +1026,15 @@ $script:RecorderJs = @'
     var v = el.getAttribute && (el.getAttribute("aria-label")||el.getAttribute("title"));
     return v ? (""+v).trim().slice(0,80) : "";
   }
+  // そのセレクタで取れる要素の中で何番目か（1始まり）。
+  // 「位置で押す」を選んだ手順に index として残す（対象者ごとに表示が変わる行の目印）。
+  function selIndex(el, sel){
+    try {
+      var l = document.querySelectorAll(sel);
+      for (var i=0;i<l.length;i++){ if(l[i]===el) return i+1; }
+    } catch(e){}
+    return 1;
+  }
   // ラベル文字列（テキスト → 自身/祖先の aria-label / title）
   function labelOf(t){
     var s=(t.innerText||t.textContent||"").trim();
@@ -1000,7 +1063,8 @@ $script:RecorderJs = @'
       var ty=(t.type||"").toLowerCase();
       if(ty!=="submit"&&ty!=="button") return; // テキスト入力はfill、チェック類はsetcheckで扱う
     }
-    push({type:"click", selector:cssPath(t), text:labelOf(t)});
+    var csel=cssPath(t);
+    push({type:"click", selector:csel, text:labelOf(t), idx:selIndex(t, csel)});
   };
   var changeH = function(e){
     var el=e.target; var tag=(el.tagName||"").toLowerCase();
@@ -1031,7 +1095,11 @@ $script:DrainJs = @'
 function Get-ActionDesc {
     param($Action)
     switch ($Action.type) {
-        "click"      { return "click $($Action.selector) ($($Action.text))" }
+        "click"      {
+            # 位置で押すクリックはボタン名を持たない（氏名が残ると照合で外れるため保存していない）
+            if ($Action.by_index) { return "click $($Action.selector) (位置で押す)" }
+            return "click $($Action.selector) ($($Action.text))"
+        }
         "goto"       { return "goto $($Action.url)" }
         "expect_url" { return "expect_url $($Action.url)" }
         "setcheck"   { return "setcheck $($Action.label) = $($Action.checked)" }
@@ -1085,6 +1153,8 @@ function Add-RecordSample {
             Complete-PendingClick -Verbose $Verbose
             $clickAct = [ordered]@{ type = "click"; selector = $e.selector }
             if ($e.text) { $clickAct.text = [string]$e.text }
+            # 記録時の並び順。「位置で押す」に選ばれた手順だけ index として残し、他は保存前に捨てる
+            if ($null -ne $e.idx) { $clickAct["_idx"] = [int]$e.idx }
             $script:RecPendingClick = $clickAct
             $script:RecClickArmed = 3
         }
@@ -1339,6 +1409,53 @@ function Start-JobRecording {
         }
         Write-Host "  待つ時間は config の wait_after_ms（既定 5000ms）で決まります。"
     }
+
+    # 対象者ごとに表示が変わる行（宛名番号が出ず氏名だけの一覧など）は、
+    # 記録した「ボタン名」で照合すると2人目以降で外れる。そういう手順は位置で押すことにする。
+    # 押すのは「見えているものがちょうど1件」のときだけなので、どの行かを人が指名する必要はない。
+    Write-Host ""
+    Write-Host "対象者ごとに表示が変わる操作はどれですか？（全 $($acts.Count) 手順）"
+    for ($n = 0; $n -lt $acts.Count; $n++) {
+        Write-Host ("{0,3}: {1}" -f ($n + 1), (Get-ActionDesc -Action $acts[$n]))
+    }
+    $ansIdx = Read-Host "番号をカンマ区切りで入力（Enterで設定しない）"
+    $byIdx = New-Object System.Collections.ArrayList
+    if ($ansIdx) {
+        foreach ($tok in ($ansIdx -split ',')) {
+            $t = $tok.Trim()
+            if (-not $t) { continue }
+            if ($t -match '^\d+$' -and [int]$t -ge 1 -and [int]$t -le $acts.Count) {
+                $i3 = [int]$t - 1
+                if ($acts[$i3].type -ne "click") {
+                    # 位置で押せるのはクリックだけ
+                    Write-Warning "クリックではないので位置で押せません（この番号は無視します）: $t $(Get-ActionDesc -Action $acts[$i3])"
+                    continue
+                }
+                if (-not $byIdx.Contains($i3)) { [void]$byIdx.Add($i3) }
+            } else {
+                # 不正な番号はそれだけ無視する（黙って採用しない）
+                Write-Warning "手順番号として正しくありません（この番号は無視します）: $t"
+            }
+        }
+    }
+    if ($byIdx.Count -eq 0) {
+        Write-Host "  位置で押す手順: なし"
+    } else {
+        foreach ($i3 in ($byIdx | Sort-Object)) {
+            $a3 = $acts[$i3]
+            $oldText = [string]$a3["text"]
+            # ボタン名は保存しない（氏名が残ると2人目以降で照合が外れるため）
+            if ($a3.Contains("text")) { $a3.Remove("text") }
+            $a3["by_index"] = $true
+            $a3["index"] = if ($null -ne $a3["_idx"]) { [int]$a3["_idx"] } else { 1 }
+            Write-Host "  位置で押す: 手順 $($i3 + 1) $(Get-ActionDesc -Action $a3) （by_index=true / index=$($a3["index"])）"
+            if ($oldText) { Write-Host "    ボタン名「$oldText」は保存しません（対象者ごとに変わるため）" }
+        }
+        Write-Host "  再生時は、画面に見えているものがちょうど1件のときだけ押します（2件以上なら押さずに失敗）。"
+    }
+
+    # 記録用の内部情報は手順ファイルに残さない
+    foreach ($a4 in $acts) { if ($a4.Contains("_idx")) { $a4.Remove("_idx") } }
 
     Save-JobFile -BaseCfg $Cfg -JobName $JobName -Actions $acts -OutPath $OutPath -SpaMode $script:RecSawSpa
     Write-Host ""

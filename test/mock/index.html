@@ -14,11 +14,14 @@
     <li class="menu-item"><a href="app.html" id="link-shomei">証明書発行</a></li>
     <li class="menu-item"><a href="spa.html#/menu" id="link-shomei-spa-entry">証明書発行（SPA版）</a></li>
     <li class="menu-item"><a href="slow.html" id="link-shomei-slow">証明書発行（プレビュー作成あり）</a></li>
+    <li class="menu-item"><a href="roster.html" id="link-shomei-roster">証明書発行（氏名だけの一覧）</a></li>
   </ul>
 </div>
 
 <div class="tool">
   <label><input type="checkbox" id="chk-flip"> （検証用）印字項目の初期状態を反転する</label>
+  <br>
+  <label><input type="checkbox" id="chk-multi"> （検証用）氏名だけの一覧の検索結果を複数件にする</label>
 </div>
 
 <h2>発行済みリスト</h2>
@@ -29,6 +32,7 @@
 <script>
 mockRenderIssued(document.getElementById("issued-box"));
 mockInitFlip(document.getElementById("chk-flip"));
+mockInitMulti(document.getElementById("chk-multi"));
 document.getElementById("btn-clear").addEventListener("click", function () {
   mockSaveIssued([]);
   mockRenderIssued(document.getElementById("issued-box"));
