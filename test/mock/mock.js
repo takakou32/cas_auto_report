@@ -59,7 +59,8 @@ function mockRenderIssued(box) {
     }
     var div = document.createElement("div");
     div.className = "issued-item";
-    div.textContent = (i + 1) + ". " + rec.atena + " " + rec.name + " / " + parts.join(" ");
+    var pv = (rec.preview === undefined) ? "" : (" / プレビュー:" + (rec.preview ? "済" : "未"));
+    div.textContent = (i + 1) + ". " + rec.atena + " " + rec.name + " / " + parts.join(" ") + pv;
     box.appendChild(div);
   }
 }

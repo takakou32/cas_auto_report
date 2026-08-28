@@ -9,6 +9,12 @@
 <h1>練習システム（SPA版）</h1>
 <p class="tool">画面遷移を pushState で行う版。リロードせずURLだけが変わる。</p>
 
+<!-- アイコンの元絵（本物の業務システムでよくある sprite + use の形） -->
+<svg class="sprite" aria-hidden="true" style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="spr-search" viewBox="0 0 24 24"><path d="M10 2a8 8 0 105.29 14.05l5.33 5.33 1.41-1.41-5.33-5.33A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></symbol>
+  <symbol id="spr-eye" viewBox="0 0 24 24"><path d="M12 5C7 5 3 9.5 3 12s4 7 9 7 9-4.5 9-7-4-7-9-7zm0 11a4 4 0 110-8 4 4 0 010 8zm0-6a2 2 0 100 4 2 2 0 000-4z"/></symbol>
+</svg>
+
 <div class="screen" id="screen-menu" style="display:none">
   <h2>メニュー</h2>
   <ul class="menu-list">
@@ -22,6 +28,7 @@
     <label for="input-atena">宛名番号</label>
     <input type="text" id="input-atena" placeholder="宛名番号">
     <button id="btn-search">検索</button>
+    <button id="btn-search-icon" class="icon-btn" title="検索"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#spr-search"></use></svg></button>
   </p>
 </div>
 
@@ -40,6 +47,11 @@
     <label><input type="checkbox" id="chk-honseki"> 本籍</label>
     <label><input type="checkbox" id="chk-mynumber"> 個人番号</label>
   </div>
+  <p class="icon-row">
+    <svg id="icon-preview" class="icon" role="button" tabindex="0" aria-label="プレビュー" viewBox="0 0 24 24"><use href="#spr-eye"></use></svg>
+    <span class="icon-note" id="preview-state">プレビュー: 未</span>
+  </p>
+  <div id="preview-box" style="display:none">プレビュー表示中（帳票の下書き）</div>
   <p><button id="btn-issue">発行</button></p>
   <div id="confirm-dialog" style="display:none">
     <p>この内容で帳票を発行します。よろしいですか？</p>
@@ -85,7 +97,7 @@ function renderResult() {
     li.className = "result-row";
     li.setAttribute("data-atena", q);
     li.textContent = q + " " + MOCK_DB[q];
-    li.addEventListener("click", function () { stateSet("spa_atena", q); go("#/print"); });
+    li.addEventListener("click", function () { stateSet("spa_atena", q); stateSet("spa_preview", "0"); go("#/print"); });
     list.appendChild(li);
     empty.style.display = "none";
   } else {
@@ -95,6 +107,9 @@ function renderResult() {
 
 function renderPrint() {
   var a = stateGet("spa_atena");
+  var pv = stateGet("spa_preview") === "1";
+  document.getElementById("preview-state").textContent = "プレビュー: " + (pv ? "済" : "未");
+  document.getElementById("preview-box").style.display = pv ? "" : "none";
   document.getElementById("print-target").textContent = (a && MOCK_DB[a]) ? (a + " " + MOCK_DB[a]) : "(未選択)";
   var init = a ? mockInitialChecks(a) : {};
   for (var i = 0; i < MOCK_ITEMS.length; i++) {
@@ -108,10 +123,21 @@ document.getElementById("link-shomei-spa").addEventListener("click", function (e
   go("#/search");
 });
 
-document.getElementById("btn-search").addEventListener("click", function () {
+// プレビューアイコン。svg要素そのものに click ハンドラを付けている（本物のアイコンUIと同じ）
+document.getElementById("icon-preview").addEventListener("click", function () {
+  stateSet("spa_preview", "1");
+  document.getElementById("preview-state").textContent = "プレビュー: 済";
+  document.getElementById("preview-box").style.display = "";
+});
+
+function doSearch() {
   stateSet("spa_query", document.getElementById("input-atena").value.trim());
   go("#/result");
-});
+}
+
+// 検索は「検索」ボタンからも虫眼鏡アイコンからも起動できる（本物の業務システムと同じ）
+document.getElementById("btn-search").addEventListener("click", doSearch);
+document.getElementById("btn-search-icon").addEventListener("click", doSearch);
 
 // 発行ボタンは確認ダイアログを出すだけ（実際の出力は「はい」）
 document.getElementById("btn-issue").addEventListener("click", function () {
@@ -133,13 +159,14 @@ document.getElementById("btn-confirm-yes").addEventListener("click", function ()
     items[MOCK_ITEMS[i].id] = document.getElementById(MOCK_ITEMS[i].id).checked;
   }
   var list = mockLoadIssued();
-  list.push({ atena: a, name: MOCK_DB[a], items: items, ts: new Date().toISOString() });
+  list.push({ atena: a, name: MOCK_DB[a], items: items, preview: stateGet("spa_preview") === "1", ts: new Date().toISOString() });
   mockSaveIssued(list);
   mockRenderIssued(document.getElementById("issued-box"));
   document.getElementById("confirm-dialog").style.display = "none";
   document.getElementById("input-atena").value = "";
   stateSet("spa_atena", "");
   stateSet("spa_query", "");
+  stateSet("spa_preview", "0");
   go("#/menu");
 });
 

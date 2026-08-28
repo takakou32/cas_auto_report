@@ -138,7 +138,13 @@ Get-CimInstance Win32_Process -Filter "name='msedge.exe'" | ? { $_.CommandLine -
 
 ## 手順3. 対象者リストを置く
 
-`targets\R001_住民票.csv`（`targets\<帳票名>.csv`）を作る。1列目が宛名番号、1行目は見出し。
+**`targets` フォルダは自分で作る**（`jobs` と `output` はツールが自動で作るが、`targets` は置く側なので作られない）。
+
+```powershell
+mkdir targets
+```
+
+その中に `targets\R001_住民票.csv`（`targets\<帳票名>.csv`）を作る。1列目が宛名番号、1行目は見出し。
 2列目以降は無視されるのでメモを書いてよい。
 
 ```csv

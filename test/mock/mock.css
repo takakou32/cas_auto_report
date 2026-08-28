@@ -11,3 +11,12 @@ h2 { font-size: 16px; margin-top: 24px; }
 .issued-item { border-bottom: 1px dotted #ccc; padding: 4px 0; font-family: "Consolas", monospace; }
 .tool { margin-top: 16px; color: #555; }
 button { padding: 4px 16px; }
+
+/* アイコン（本物の業務システムでよくある形を模す） */
+.icon-btn { padding: 2px 6px; vertical-align: middle; line-height: 0; }
+.icon-btn svg { width: 18px; height: 18px; fill: #234; pointer-events: auto; }
+.icon { width: 22px; height: 22px; fill: #356; cursor: pointer; vertical-align: middle; }
+.icon:hover { fill: #a40; }
+.icon-row { margin: 8px 0; }
+.icon-note { color: #555; margin-left: 6px; }
+#preview-box { border: 1px dashed #888; padding: 8px; margin: 6px 0; background: #fff; }

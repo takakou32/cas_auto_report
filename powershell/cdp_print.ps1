@@ -295,7 +295,38 @@ new Promise((resolve) => {
     return list.find(function(e){ return txtOf(e) === text; })
         || list.find(function(e){ return matches(txtOf(e), text); });
   }
-  function go(e,how){ e.scrollIntoView({block:'center'}); e.click(); return resolve(how); }
+  // click() は HTML の要素にしかない。SVG(アイコン等)には無いので、そのまま呼ぶと
+  // 「e.click is not a function」で落ちる。その場合はマウス操作を作って投げる。
+  // 投げ先は要素そのもの。イベントは祖先へ伝わるので、ボタン側の処理も動く。
+  function rawClick(e){
+    var r=e.getBoundingClientRect();
+    var x=r.left+r.width/2, y=r.top+r.height/2;
+    // detail(押した回数)・pointerType(何で押したか)まで入れる。
+    // これを見て動きを決めるページがあり、無いと「エラーは出ないが何も起きない」になる。
+    var m={bubbles:true, cancelable:true, composed:true, view:window,
+           clientX:x, clientY:y, screenX:x, screenY:y,
+           button:0, buttons:1, detail:1};
+    var p={}; for(var k in m) p[k]=m[k];
+    p.pointerId=1; p.pointerType='mouse'; p.isPrimary=true; p.width=1; p.height=1; p.pressure=0.5;
+    try { e.dispatchEvent(new PointerEvent('pointerdown', p)); } catch(_){}
+    e.dispatchEvent(new MouseEvent('mousedown', m));
+    // click() と違い、投げるだけではフォーカスが移らないので明示的に当てる
+    try { if(typeof e.focus==='function') e.focus({preventScroll:true}); } catch(_){}
+    var pu={}; for(var k2 in p) pu[k2]=p[k2];
+    pu.buttons=0; pu.pressure=0;
+    try { e.dispatchEvent(new PointerEvent('pointerup', pu)); } catch(_){}
+    var mu={}; for(var k3 in m) mu[k3]=m[k3];
+    mu.buttons=0;
+    e.dispatchEvent(new MouseEvent('mouseup', mu));
+    e.dispatchEvent(new MouseEvent('click', mu));
+  }
+  function go(e,how){
+    e.scrollIntoView({block:'center'});
+    // 押す相手は記録した要素そのもの。祖先に押し替えると、
+    // 押された場所を見て動きを変えるページで結果が変わるため。
+    if(typeof e.click==='function'){ e.click(); } else { rawClick(e); }
+    return resolve(how);
+  }
   (function check(){
     var el = null; try { el = document.querySelector(sel); } catch(e){}
     // 1) セレクタが当たり、かつ(テキスト未記録 or ラベル一致) → それをクリック
