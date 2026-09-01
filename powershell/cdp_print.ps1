@@ -743,9 +743,14 @@ function Invoke-JobForAtena {
           [bool]$DryRunMode, [string]$Evidence, [int]$WaitAfterMs)
 
     $stopped = $false
+    $stepNo = 0
     foreach ($a in @($JobDef.actions)) {
+        $stepNo++
         $act = Expand-JobAction -Action $a -AtenaNo $AtenaNo
         $isFinal = [bool]$act.final
+        # 失敗したとき、どの手順で落ちたかを台帳に残すために控えておく。
+        # 理由だけでは「何番目の操作か」が分からず、毎回切り分けから始めることになる。
+        $script:CurrentStep = "手順$stepNo $(Get-ActionDesc -Action $act)"
 
         if ($isFinal -and ($Evidence -eq "before" -or $Evidence -eq "both")) {
             Save-Screenshot -Ws $Ws -Path (Join-Path (Join-Path "output" $JobName) "${AtenaNo}_before.png")
@@ -870,6 +875,7 @@ function Invoke-PrintRun {
                 }
 
                 Write-Host "[$name] $atenaNo : 処理中..."
+                $script:CurrentStep = $null
                 # DryRunは「試しに流しただけ」なので ok とは区別する（本番のスキップ判定はokのみ）
                 $status = if ($DryRunMode) { "dry" } else { "ok" }
                 $errText = ""
@@ -879,7 +885,8 @@ function Invoke-PrintRun {
                         -WaitAfterMs $waitAfterMs
                 } catch {
                     $status = "fail"
-                    $errText = "$_"
+                    # どの手順で落ちたかを頭に付ける（理由だけでは場所が分からないため）
+                    $errText = if ($script:CurrentStep) { "$($script:CurrentStep) / $_" } else { "$_" }
                 }
                 Add-LedgerRow -Path $script:LedgerPath -JobName $name -AtenaNo $atenaNo `
                     -Status $status -ErrorText $errText
@@ -944,6 +951,9 @@ $script:RecorderJs = @'
       return c && c.length>1
         && !/[0-9]{3,}/.test(c)
         && !/^(ng-|v-|jsx-|css-|sc-|is-|has-|active|selected|open|show|hover|focus)/.test(c)
+        // 「いまの状態」を表すクラスは使わない。選んだ・入力した・開いた等で消えるため、
+        // 記録時に残すと2人目以降でセレクタが当たらなくなる（例 p-dropdown-label-empty）
+        && !/(^|-)(empty|filled|focus|focused|active|selected|checked|open|opened|expanded|collapsed|disabled|highlight|invalid|error|loading|busy|hover|dirty|touched|pristine)$/i.test(c)
         && !/--[0-9a-f]{4,}/.test(c)
         && !/[0-9a-f]{6,}/.test(c);
     });
