@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>練習システム - 証明書発行（交付理由の選択あり）</title>
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<h1>証明書発行（交付理由の選択あり）</h1>
+
+<!-- 実環境（PrimeVue系）で起きた症状を再現するための画面。
+     ・交付理由は PrimeVue の Dropdown と同じ作り
+       （未選択のとき ラベルに p-dropdown-label-empty が付き、選ぶと消える）
+     ・選んだ内容はシステム側が覚えている想定（練習ページでは localStorage で模す）。
+       このため2人目以降は「未選択」ではなくなり、状態のクラスは付いていない。
+     ・使用目的は最初から選択済み。こちらは常に p-dropdown-label-empty を持たない。 -->
+
+<div class="screen" id="screen-search">
+  <h2>対象者検索</h2>
+  <p>
+    <label for="input-atena">宛名番号</label>
+    <input type="text" id="input-atena" placeholder="宛名番号">
+    <button id="btn-search">検索</button>
+  </p>
+</div>
+
+<div class="screen" id="screen-result" style="display:none">
+  <h2>検索結果</h2>
+  <ul class="result-list" id="result-list"></ul>
+  <p class="empty" id="result-empty" style="display:none">該当する対象者はいません</p>
+</div>
+
+<div class="screen" id="screen-print" style="display:none">
+  <h2>印字項目の選択</h2>
+  <p>対象者: <span id="print-target"></span></p>
+  <div class="items">
+    <label><input type="checkbox" id="chk-setai"> 世帯主</label>
+    <label><input type="checkbox" id="chk-zokugara"> 続柄</label>
+    <label><input type="checkbox" id="chk-honseki"> 本籍</label>
+    <label><input type="checkbox" id="chk-mynumber"> 個人番号</label>
+  </div>
+
+  <!-- PrimeVue の Dropdown を模した作り。id は自動採番（pv_id_*）で毎回変わる想定 -->
+  <div class="dd-list" id="dd-list">
+    <div class="dd-row">
+      <span class="dd-caption">交付理由</span>
+      <div class="p-dropdown p-component" id="pv_id_17">
+        <span class="p-dropdown-label p-inputtext p-dropdown-label-empty">&nbsp;</span>
+        <div class="p-dropdown-trigger">▼</div>
+      </div>
+      <div class="p-dropdown-panel" style="display:none">
+        <ul class="p-dropdown-items">
+          <li class="p-dropdown-item">窓口交付</li>
+          <li class="p-dropdown-item">郵送交付</li>
+          <li class="p-dropdown-item">代理人交付</li>
+        </ul>
+      </div>
+    </div>
+    <div class="dd-row">
+      <span class="dd-caption">使用目的</span>
+      <div class="p-dropdown p-component" id="pv_id_23">
+        <span class="p-dropdown-label p-inputtext">本人請求</span>
+        <div class="p-dropdown-trigger">▼</div>
+      </div>
+      <div class="p-dropdown-panel" style="display:none">
+        <ul class="p-dropdown-items">
+          <li class="p-dropdown-item">本人請求</li>
+          <li class="p-dropdown-item">第三者請求</li>
+          <li class="p-dropdown-item">官公署提出</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <p><button id="btn-issue">発行</button></p>
+  <div id="confirm-dialog" style="display:none">
+    <p>この内容で帳票を発行します。よろしいですか？</p>
+    <p><button id="btn-confirm-yes">はい</button> <button id="btn-confirm-no">いいえ</button></p>
+  </div>
+</div>
+
+<h2>発行済みリスト</h2>
+<div id="issued-box"></div>
+
+<script src="mock.js"></script>
+<script>
+var selected = null;
+
+// ドロップダウン2つ。1つ目=交付理由（最初は未選択）／2つ目=使用目的（最初から選択済み）
+var DD = [
+  { key: "mock_riyu",     init: "" },
+  { key: "mock_mokuteki", init: "本人請求" }
+];
+
+function ddValue(i) {
+  try {
+    var v = localStorage.getItem(DD[i].key);
+    return (v === null) ? DD[i].init : v;
+  } catch (e) { return DD[i].init; }
+}
+
+function ddSetValue(i, v) {
+  try { localStorage.setItem(DD[i].key, v); } catch (e) {}
+  ddRender(i);
+}
+
+// ラベルの見た目を値に合わせる。未選択のときだけ p-dropdown-label-empty を付ける
+// （PrimeVue と同じ。選ぶとこのクラスは消える）
+function ddRender(i) {
+  var rows = document.querySelectorAll("#dd-list .dd-row");
+  var label = rows[i].querySelector(".p-dropdown-label");
+  var v = ddValue(i);
+  if (v) {
+    label.textContent = v;
+    label.classList.remove("p-dropdown-label-empty");
+  } else {
+    label.innerHTML = "&nbsp;";
+    label.classList.add("p-dropdown-label-empty");
+  }
+  var items = rows[i].querySelectorAll(".p-dropdown-item");
+  for (var k = 0; k < items.length; k++) {
+    if (items[k].textContent === v) { items[k].classList.add("p-highlight"); }
+    else { items[k].classList.remove("p-highlight"); }
+  }
+}
+
+function ddInit() {
+  var rows = document.querySelectorAll("#dd-list .dd-row");
+  for (var i = 0; i < rows.length; i++) {
+    (function (n) {
+      var row = rows[n];
+      var box = row.querySelector(".p-dropdown");
+      var panel = row.querySelector(".p-dropdown-panel");
+      box.addEventListener("click", function () {
+        panel.style.display = (panel.style.display === "none") ? "" : "none";
+      });
+      var items = row.querySelectorAll(".p-dropdown-item");
+      for (var j = 0; j < items.length; j++) {
+        (function (li) {
+          li.addEventListener("click", function () {
+            ddSetValue(n, li.textContent);
+            panel.style.display = "none";
+          });
+        })(items[j]);
+      }
+      ddRender(n);
+    })(i);
+  }
+}
+
+function showScreen(id) {
+  var ids = ["screen-search", "screen-result", "screen-print"];
+  for (var i = 0; i < ids.length; i++) {
+    document.getElementById(ids[i]).style.display = (ids[i] === id) ? "" : "none";
+  }
+}
+
+function doSearch() {
+  var atena = document.getElementById("input-atena").value.trim();
+  var list = document.getElementById("result-list");
+  var empty = document.getElementById("result-empty");
+  list.innerHTML = "";
+  selected = null;
+  if (MOCK_DB[atena]) {
+    var li = document.createElement("li");
+    li.className = "result-row";
+    li.textContent = atena + " " + MOCK_DB[atena];
+    li.addEventListener("click", function () { selectTarget(atena); });
+    list.appendChild(li);
+    empty.style.display = "none";
+  } else {
+    empty.style.display = "";
+  }
+  showScreen("screen-result");
+}
+
+document.getElementById("btn-search").addEventListener("click", doSearch);
+
+function selectTarget(atena) {
+  selected = { atena: atena, name: MOCK_DB[atena] };
+  document.getElementById("print-target").textContent = atena + " " + MOCK_DB[atena];
+  var init = mockInitialChecks(atena);
+  for (var i = 0; i < MOCK_ITEMS.length; i++) {
+    document.getElementById(MOCK_ITEMS[i].id).checked = !!init[MOCK_ITEMS[i].id];
+  }
+  showScreen("screen-print");
+}
+
+document.getElementById("btn-issue").addEventListener("click", function () {
+  if (!selected) { return; }
+  document.getElementById("confirm-dialog").style.display = "";
+});
+
+document.getElementById("btn-confirm-no").addEventListener("click", function () {
+  document.getElementById("confirm-dialog").style.display = "none";
+});
+
+// 「はい」で発行。交付理由・使用目的も帳票に載せる（どちらを選んだかの証拠になる）
+document.getElementById("btn-confirm-yes").addEventListener("click", function () {
+  if (!selected) { return; }
+  var items = {};
+  for (var i = 0; i < MOCK_ITEMS.length; i++) {
+    items[MOCK_ITEMS[i].id] = document.getElementById(MOCK_ITEMS[i].id).checked;
+  }
+  var list = mockLoadIssued();
+  list.push({ atena: selected.atena, name: selected.name, items: items,
+              riyu: ddValue(0), mokuteki: ddValue(1), ts: new Date().toISOString() });
+  mockSaveIssued(list);
+  mockRenderIssued(document.getElementById("issued-box"));
+  selected = null;
+  document.getElementById("confirm-dialog").style.display = "none";
+  document.getElementById("input-atena").value = "";
+  showScreen("screen-search");
+});
+
+ddInit();
+mockRenderIssued(document.getElementById("issued-box"));
+</script>
+</body>
+</html>

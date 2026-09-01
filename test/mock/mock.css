@@ -38,3 +38,22 @@ button { padding: 4px 16px; }
 .p-datatable th { background: #eef; }
 tr.p-selectable-row { cursor: pointer; }
 tr.p-selectable-row:hover { background: #eef; }
+
+/* 交付理由の選択（dropdown.html）。実環境（PrimeVue系）のDropdownに合わせた作り。
+   未選択のときだけ p-dropdown-label-empty が付く（＝いまの状態を表すクラス） */
+.dd-list { margin: 10px 0; }
+.dd-row { margin: 6px 0; }
+.dd-caption { display: inline-block; width: 6em; color: #333; }
+.p-dropdown {
+  display: inline-flex; align-items: center; min-width: 14em;
+  border: 1px solid #aab; background: #fff; cursor: pointer; vertical-align: middle;
+}
+.p-dropdown * { cursor: pointer; }
+.p-dropdown-label { flex: 1 1 auto; padding: 4px 8px; min-height: 1.2em; }
+.p-dropdown-label-empty { color: #999; }
+.p-dropdown-trigger { width: 2em; text-align: center; color: #456; border-left: 1px solid #ccd; }
+.p-dropdown-panel { border: 1px solid #aab; background: #fff; display: inline-block; margin-left: 6em; }
+.p-dropdown-items { list-style: none; margin: 0; padding: 0; }
+.p-dropdown-item { padding: 4px 12px; cursor: pointer; }
+.p-dropdown-item:hover { background: #eef; }
+.p-dropdown-item.p-highlight { background: #dde; font-weight: bold; }
